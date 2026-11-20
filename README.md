@@ -1,13 +1,13 @@
 ﻿# Crm
 
-En liten webapp for kundebehandling (CRM). Dette er startpunktet for DI-oppgaven (1C) i Delmodul 1. Repoet inneholder hele API-et fra API-oppgaven, og du skal nå endre hvordan koden er koblet sammen, uten å endre hva API-et gjør.
+En liten webapp for kundebehandling (CRM). Dette er løsningsforslaget til DI-oppgaven (1C) i Modul 1. API-et gjør det samme som i `crm-1-di-start`, men alle endepunktene får nå tjenestene sine fra DI-containeren. Kunder og aktiviteter kan lagres i JSON, XML eller i minnet, og du bytter lagring ved å endre én linje i `Program.cs`.
 
 ## Hva den gjør
 
 - **Kunder:** liste med søk og statusfilter, detaljside, opprett, endre og slett.
 - **Aktiviteter:** registrer møter, samtaler, e-poster og oppgaver for en kunde, merk dem som ferdige, og se alle åpne aktiviteter i én oversikt. Forfalte aktiviteter er markert.
 - **API (JSON):** alle endepunktene under `/api`, som beskrevet under.
-- **Dependency injection (DI):** `ICustomerService` er registrert, og ett endepunkt bruker den. Resten gjør du i oppgaven.
+- **Dependency injection (DI):** `ICustomerService` og `IActivityService` er registrert, og alle endepunktene får dem som parameter. Ingen endepunkter lager tjenestene selv med `new`.
 
 ## Krav
 
@@ -92,61 +92,74 @@ Endepunktene under `/api` returnerer data som JSON, ikke HTML.
 
 Åpne filen i Visual Studio, start appen, og trykk **Send request** over et kall. Kjør kallene ovenfra og ned. Noen kall bruker variabler øverst i filen (`@newCustomerId`, `@activityId` og `@tempCustomerId`). Sett dem til id-en i svaret fra opprett-kallet før du kjører de neste. Hvis appen kjører på en annen port enn 5080, endrer du `@host`.
 
-#### `Assignment.http` og DI
-
-DI endrer hvordan koden er koblet sammen, ikke hva API-et gjør. Alle kallene i `Assignment.http` skal derfor gi de samme statuskodene og svarene etter DI-oppgaven som før.
-
-- Kjør kallene før du begynner, slik at du vet at alt fungerer.
-- Kjør dem på nytt etter hver endring.
-- Hvis et kall som virket, slutter å virke, har du en loggføring til `Log.md`.
+Alle kallene skal gi de samme statuskodene og svarene uansett hvilken implementasjon som er registrert.
 
 ## DI i dette repoet
 
-Dette er allerede gjort, og er det samme som DI-videoen viser:
+### Endret siden `crm-1-di-start`
 
-- `Services/ICustomerService.cs` er et interface med metodene i `CustomerService`.
-- `Program.cs` registrerer tjenesten: `builder.Services.AddScoped<ICustomerService, CustomerService>();`
-- `GET /api/customers` får `ICustomerService` som parameter, i stedet for å lage tjenesten med `new`.
+- `CustomerService` har fått nytt navn: `JsonCustomerService`.
+- `ActivityService` har fått nytt navn: `JsonActivityService`, og implementerer det nye interfacet `IActivityService`.
+- Nye implementasjoner: `InMemoryCustomerService`, `XmlCustomerService`, `InMemoryActivityService` og `XmlActivityService`.
+- Alle endepunktene i `Program.cs`, både HTML-sidene og API-et, får `ICustomerService` og `IActivityService` som parameter i stedet for å lage tjenestene med `new`.
+- `activities.xml` følges ikke av Git.
 
-Alle de andre endepunktene lager fortsatt tjenesten selv med `new CustomerService()`. Det er utgangspunktet for oppgaven.
+### Tre implementasjoner bak hvert interface
 
-Under `GET /api/customers` i `Program.cs` står varianten fra videoen som en kommentar. Den bruker `GetAll` og har ikke søk og statusfilter.
+| Interface | Implementasjon | Lagring | Registrering |
+|---|---|---|---|
+| `ICustomerService` | `JsonCustomerService` | `customers.json` | `AddScoped` |
+| | `XmlCustomerService` | `customers.xml` | `AddScoped` |
+| | `InMemoryCustomerService` | Liste i minnet, med de fem eksempelkundene | `AddSingleton` |
+| `IActivityService` | `JsonActivityService` | `activities.json` | `AddScoped` |
+| | `XmlActivityService` | `activities.xml` | `AddScoped` |
+| | `InMemoryActivityService` | Liste i minnet, starter tom | `AddSingleton` |
+
+### Bytt implementasjon
+
+Øverst i `Program.cs` står én aktiv linje per interface. Flytt kommentaren `//` for å bytte:
+
+```csharp
+builder.Services.AddScoped<ICustomerService, JsonCustomerService>();
+//builder.Services.AddScoped<ICustomerService, XmlCustomerService>();
+//builder.Services.AddSingleton<ICustomerService, InMemoryCustomerService>();
+```
+
+Kunder og aktiviteter byttes hver for seg. Resten av koden er uendret, fordi endepunktene bare kjenner interfacet.
+
+### Hvorfor `AddSingleton` for versjonene i minnet?
+
+Med `AddScoped` lages en ny instans for hvert kall. Listen i minnet starter da på nytt hver gang, og en kunde du nettopp opprettet er borte i neste kall. Med `AddSingleton` lever instansen like lenge som appen. Fil-versjonene leser filen for hvert kall og virker med begge.
 
 ## Prosjektstruktur
 
 ```
 Program.cs          Endepunkter, hjelpefunksjoner og registrering av tjenester (DI)
 Models/             Customer og Activity
-Services/           ICustomerService, CustomerService og ActivityService (lagrer data i JSON-filer)
+Services/           ICustomerService og IActivityService, med JSON-, XML- og minneimplementasjoner
 Templates/          HTML-maler med {{placeholders}}
 wwwroot/            CSS og JavaScript
-customers.json      Eksempelkunder JSON format (appen endrer denne filen)
-customers.xml		Eksempelkunder XML format (appen endrer denne filen)
+customers.json      Eksempelkunder i JSON-format (appen endrer denne filen)
+customers.xml       Eksempelkunder i XML-format (appen endrer denne filen)
 Crm.http            De tre første kallene fra API-videoen
-Assignment.http     Alle kallene som tester API-et. Skal gi samme svar før og etter DI-oppgaven
-Log.md              Logg og designnotater som du fører underveis (del av leveransen)
-TestResults.md      Resultatene fra kallene i Assignment.http (del av leveransen)
+Assignment.http     Alle kallene som tester API-et. Skal gi samme svar med alle implementasjonene
+Log.md              Logg og designnotater
+TestResults.md      Resultatene fra kallene i Assignment.http
 ```
 
 ## Data
 
-- `customers.json` og `customers.xml` inneholder fem eksempelkunder. Appen skriver til disse filene når du oppretter, endrer eller sletter kunder, så de vises som endret i Git. Slik gjenoppretter du eksempeldataene:
+- `customers.json` og `customers.xml` inneholder fem eksempelkunder. Appen skriver til filen som hører til den registrerte implementasjonen, så den vises som endret i Git. Slik gjenoppretter du eksempeldataene:
 
 ```
 git checkout customers.json
 git checkout customers.xml
 ```
 
-- `activities.json` opprettes første gang du legger til en aktivitet. Den følges ikke av Git. Slett filen for å fjerne alle aktiviteter.
+- `activities.json` og `activities.xml` opprettes første gang du legger til en aktivitet med JSON- eller XML-versjonen. De følges ikke av Git. Slett filen for å fjerne alle aktiviteter.
+- Versjonene i minnet nullstilles hver gang appen startes på nytt.
 
 Nullstill dataene før du kjører hele `Assignment.http` på nytt. Standardverdiene for variablene øverst i filen stemmer bare med ferske data.
-
-## Logg og testresultater
-
-Repoet inneholder to filer som du fyller ut underveis. Begge er en del av leveransen, sammen med koden og `Assignment.http`.
-
-- **`Log.md`:** før logg mens du jobber med oppgaven: feil du møter, og korte designnotater om valg du tar. Malene ligger i filen. Commit loggen sammen med koden.
-- **`TestResults.md`:** før inn statuskodene du faktisk får for hvert kall i `Assignment.http`. For noen kall står det også hva du skal sjekke i svaret.
 
 ## Feilsøking
 
@@ -156,6 +169,7 @@ Repoet inneholder to filer som du fyller ut underveis. Begge er en del av levera
 | Feil eller blank side rett etter oppstart | Appen er startet fra feil mappe. Start den fra mappen med `Crm.csproj`. |
 | Port 5080 er opptatt | Endre `applicationUrl` i `Properties/launchSettings.json`, og `@host` i `.http`-filene. |
 | `Send request` vises ikke over kallene i `.http`-filene | Filen må ha endelsen `.http`, og Visual Studio må være en nyere versjon. |
-| Dataene ser rare ut etter eksperimentering | Gjenopprett `customers.json` og slett `activities.json`. |
-| Appen feiler etter at du har lagt til en tjeneste som parameter i et endepunkt | Tjenesten er ikke registrert med `builder.Services` i `Program.cs`, eller parameteren har feil type. |
-| Et kall i `Assignment.http` gir 404 for en id som skulle finnes | Variablene øverst i filen peker på feil id. Sett dem til id-en i svaret fra opprett-kallet. |
+| Dataene ser rare ut etter eksperimentering | Gjenopprett `customers.json` og `customers.xml`, og slett `activities.json` og `activities.xml`. |
+| Appen feiler med at en tjeneste ikke kan løses | Interfacet er ikke registrert med `builder.Services` i `Program.cs`, eller ingen linje for det interfacet er aktiv. |
+| En kunde eller aktivitet forsvinner rett etter at den er opprettet | Versjonen i minnet er registrert med `AddScoped`. Bruk `AddSingleton`. |
+| Et kall i `Assignment.http` gir 404 for en id som skulle finnes | Variablene øverst i filen peker på feil id, eller dataene er ikke nullstilt. |

@@ -1,11 +1,12 @@
-using System.Text.Json;
+using System.Xml.Serialization;
 using Crm.Models;
 
 namespace Crm.Services;
 
-public class CustomerService : ICustomerService
+public class XmlCustomerService : ICustomerService
 {
-    private string path = "customers.json";
+    private string path = "customers.xml";
+    private XmlSerializer serializer = new XmlSerializer(typeof(List<Customer>));
 
     // Read all customers from the file
     public List<Customer> GetAll()
@@ -13,8 +14,8 @@ public class CustomerService : ICustomerService
         if (!File.Exists(path))
             return new List<Customer>();
 
-        string json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<List<Customer>>(json) ?? new List<Customer>();
+        using var stream = File.OpenRead(path);
+        return serializer.Deserialize(stream) as List<Customer> ?? new List<Customer>();
     }
 
     public Customer? GetById(int id)
@@ -76,7 +77,7 @@ public class CustomerService : ICustomerService
     // Write the whole list back to the file
     private void Save(List<Customer> all)
     {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(path, JsonSerializer.Serialize(all, options));
+        using var stream = File.Create(path);
+        serializer.Serialize(stream, all);
     }
 }

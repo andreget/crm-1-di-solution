@@ -1,19 +1,20 @@
-﻿using System.Text.Json;
+using System.Xml.Serialization;
 using Crm.Models;
 
 namespace Crm.Services;
 
-public class ActivityService
+public class XmlActivityService : IActivityService
 {
-    private string path = "activities.json";
+    private string path = "activities.xml";
+    private XmlSerializer serializer = new XmlSerializer(typeof(List<Activity>));
 
     public List<Activity> GetAll()
     {
         if (!File.Exists(path))
             return new List<Activity>();
 
-        string json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<List<Activity>>(json) ?? new List<Activity>();
+        using var stream = File.OpenRead(path);
+        return serializer.Deserialize(stream) as List<Activity> ?? new List<Activity>();
     }
 
     // Newest first
@@ -69,7 +70,7 @@ public class ActivityService
 
     private void Save(List<Activity> all)
     {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(path, JsonSerializer.Serialize(all, options));
+        using var stream = File.Create(path);
+        serializer.Serialize(stream, all);
     }
 }

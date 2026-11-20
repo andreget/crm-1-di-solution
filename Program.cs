@@ -4,17 +4,26 @@ using Crm.Models;
 using Crm.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddScoped<ICustomerService, CustomerService>();
+
+// Customers: choose one implementation
+//builder.Services.AddScoped<ICustomerService, JsonCustomerService>();
+//builder.Services.AddScoped<ICustomerService, XmlCustomerService>();
+builder.Services.AddSingleton<ICustomerService, InMemoryCustomerService>(); // Singleton: the list must live as long as the app
+
+// Activities: choose one implementation
+//builder.Services.AddScoped<IActivityService, JsonActivityService>();
+//builder.Services.AddScoped<IActivityService, XmlActivityService>();
+builder.Services.AddSingleton<IActivityService, InMemoryActivityService>();
+
 var app = builder.Build();
 
 app.UseStaticFiles(); // serves wwwroot (css and js)
 
 // ---------- List ----------
 
-app.MapGet("/", (string? search, string? status) =>
+app.MapGet("/", (string? search, string? status, ICustomerService customerService) =>
 {
-    var service = new CustomerService();
-    var customers = service.Search(search, status);
+    var customers = customerService.Search(search, status);
 
     string rows = "";
     foreach (var c in customers)
@@ -51,7 +60,7 @@ app.MapGet("/customers/new", () =>
     return Results.Content(FormPage(new Customer(), "New customer", "/customers/new", ""), "text/html");
 });
 
-app.MapPost("/customers/new", async (HttpRequest request) =>
+app.MapPost("/customers/new", async (HttpRequest request, ICustomerService customerService) =>
 {
     var customer = ReadCustomer(await request.ReadFormAsync());
 
@@ -59,19 +68,19 @@ app.MapPost("/customers/new", async (HttpRequest request) =>
     if (error != "")
         return Results.Content(FormPage(customer, "New customer", "/customers/new", error), "text/html");
 
-    new CustomerService().Add(customer);
+    customerService.Add(customer);
     return Results.Redirect("/");
 });
 
 // ---------- Customer details ----------
 
-app.MapGet("/customers/{id:int}", (int id) =>
+app.MapGet("/customers/{id:int}", (int id, ICustomerService customerService, IActivityService activityService) =>
 {
-    var customer = new CustomerService().GetById(id);
+    var customer = customerService.GetById(id);
     if (customer == null)
         return Results.NotFound();
 
-    var activities = new ActivityService().GetByCustomer(id);
+    var activities = activityService.GetByCustomer(id);
 
     string rows = "";
     foreach (var a in activities)
@@ -97,16 +106,16 @@ app.MapGet("/customers/{id:int}", (int id) =>
 
 // ---------- Edit ----------
 
-app.MapGet("/customers/{id:int}/edit", (int id) =>
+app.MapGet("/customers/{id:int}/edit", (int id, ICustomerService customerService) =>
 {
-    var customer = new CustomerService().GetById(id);
+    var customer = customerService.GetById(id);
     if (customer == null)
         return Results.NotFound();
 
     return Results.Content(FormPage(customer, "Edit customer", $"/customers/{id}/edit", ""), "text/html");
 });
 
-app.MapPost("/customers/{id:int}/edit", async (int id, HttpRequest request) =>
+app.MapPost("/customers/{id:int}/edit", async (int id, HttpRequest request, ICustomerService customerService) =>
 {
     var customer = ReadCustomer(await request.ReadFormAsync());
     customer.Id = id;
@@ -115,7 +124,7 @@ app.MapPost("/customers/{id:int}/edit", async (int id, HttpRequest request) =>
     if (error != "")
         return Results.Content(FormPage(customer, "Edit customer", $"/customers/{id}/edit", error), "text/html");
 
-    if (!new CustomerService().Update(customer))
+    if (!customerService.Update(customer))
         return Results.NotFound();
 
     return Results.Redirect("/");
@@ -123,9 +132,9 @@ app.MapPost("/customers/{id:int}/edit", async (int id, HttpRequest request) =>
 
 // ---------- Delete ----------
 
-app.MapGet("/customers/{id:int}/delete", (int id) =>
+app.MapGet("/customers/{id:int}/delete", (int id, ICustomerService customerService) =>
 {
-    var customer = new CustomerService().GetById(id);
+    var customer = customerService.GetById(id);
     if (customer == null)
         return Results.NotFound();
 
@@ -139,20 +148,20 @@ app.MapGet("/customers/{id:int}/delete", (int id) =>
     return Results.Content(html, "text/html");
 });
 
-app.MapPost("/customers/{id:int}/delete", (int id) =>
+app.MapPost("/customers/{id:int}/delete", (int id, ICustomerService customerService, IActivityService activityService) =>
 {
-    new CustomerService().Delete(id);
-    new ActivityService().DeleteByCustomer(id); // remove the customer's activities too
+    customerService.Delete(id);
+    activityService.DeleteByCustomer(id); // remove the customer's activities too
     return Results.Redirect("/");
 });
 
 // ---------- Activities ----------
 
 // All open activities across customers
-app.MapGet("/activities", () =>
+app.MapGet("/activities", (ICustomerService customerService, IActivityService activityService) =>
 {
-    var customers = new CustomerService().GetAll();
-    var activities = new ActivityService().GetOpen();
+    var customers = customerService.GetAll();
+    var activities = activityService.GetOpen();
 
     string rows = "";
     foreach (var a in activities)
@@ -170,9 +179,9 @@ app.MapGet("/activities", () =>
     return Results.Content(html, "text/html");
 });
 
-app.MapPost("/customers/{id:int}/activities", async (int id, HttpRequest request) =>
+app.MapPost("/customers/{id:int}/activities", async (int id, HttpRequest request, ICustomerService customerService, IActivityService activityService) =>
 {
-    if (new CustomerService().GetById(id) == null)
+    if (customerService.GetById(id) == null)
         return Results.NotFound();
 
     var form = await request.ReadFormAsync();
@@ -184,7 +193,7 @@ app.MapPost("/customers/{id:int}/activities", async (int id, HttpRequest request
         if (!DateTime.TryParse(form["date"].ToString(), out var date))
             date = DateTime.Now;
 
-        new ActivityService().Add(new Activity
+        activityService.Add(new Activity
         {
             CustomerId = id,
             Type = Activity.Types.Contains(type) ? type : "Task",
@@ -197,17 +206,17 @@ app.MapPost("/customers/{id:int}/activities", async (int id, HttpRequest request
     return Results.Redirect($"/customers/{id}");
 });
 
-app.MapPost("/activities/{id:int}/done", async (int id, HttpRequest request) =>
+app.MapPost("/activities/{id:int}/done", async (int id, HttpRequest request, IActivityService activityService) =>
 {
     var form = await request.ReadFormAsync();
-    new ActivityService().SetDone(id, form["done"] == "true");
+    activityService.SetDone(id, form["done"] == "true");
     return Results.Redirect(SafeBack(form["back"].ToString()));
 });
 
-app.MapPost("/activities/{id:int}/delete", async (int id, HttpRequest request) =>
+app.MapPost("/activities/{id:int}/delete", async (int id, HttpRequest request, IActivityService activityService) =>
 {
     var form = await request.ReadFormAsync();
-    new ActivityService().Delete(id);
+    activityService.Delete(id);
     return Results.Redirect(SafeBack(form["back"].ToString()));
 });
 
@@ -219,66 +228,62 @@ app.MapGet("/api/statuses", () => Customer.Statuses);
 app.MapGet("/api/activity-types", () => Activity.Types);
 
 // Customers: list with optional search and status filter
-// The service is injected by the DI container instead of created with new
-app.MapGet("/api/customers", (string? search, string? status, ICustomerService service) =>
+app.MapGet("/api/customers", (string? search, string? status, ICustomerService customerService) =>
 {
-    return service.Search(search, status);
+    return customerService.Search(search, status);
 });
 
-// Version from the DI video: same injection, but without search and status filter
-//app.MapGet("/api/customers", (ICustomerService service) => service.GetAll());
-
 // Returns one customer, or 404 if the id does not exist
-app.MapGet("/api/customers/{id:int}", (int id) =>
+app.MapGet("/api/customers/{id:int}", (int id, ICustomerService customerService) =>
 {
-    var customer = new CustomerService().GetById(id);
+    var customer = customerService.GetById(id);
     return customer == null ? Results.NotFound() : Results.Ok(customer);
 });
 
-app.MapPost("/api/customers", (Customer customer) =>
+app.MapPost("/api/customers", (Customer customer, ICustomerService customerService) =>
 {
     string error = ValidateApiCustomer(customer);
     if (error != "")
         return Results.BadRequest(new { error });
 
-    new CustomerService().Add(customer);
+    customerService.Add(customer);
     return Results.Created($"/api/customers/{customer.Id}", customer);
 });
 
-app.MapPut("/api/customers/{id:int}", (int id, Customer customer) =>
+app.MapPut("/api/customers/{id:int}", (int id, Customer customer, ICustomerService customerService) =>
 {
     string error = ValidateApiCustomer(customer);
     if (error != "")
         return Results.BadRequest(new { error });
 
     customer.Id = id;
-    if (!new CustomerService().Update(customer))
+    if (!customerService.Update(customer))
         return Results.NotFound();
 
     return Results.Ok(customer);
 });
 
-app.MapDelete("/api/customers/{id:int}", (int id) =>
+app.MapDelete("/api/customers/{id:int}", (int id, ICustomerService customerService, IActivityService activityService) =>
 {
-    if (!new CustomerService().Delete(id))
+    if (!customerService.Delete(id))
         return Results.NotFound();
 
-    new ActivityService().DeleteByCustomer(id); // the customer's activities go too
+    activityService.DeleteByCustomer(id); // the customer's activities go too
     return Results.NoContent();
 });
 
 // Activities for one customer
-app.MapGet("/api/customers/{id:int}/activities", (int id) =>
+app.MapGet("/api/customers/{id:int}/activities", (int id, ICustomerService customerService, IActivityService activityService) =>
 {
-    if (new CustomerService().GetById(id) == null)
+    if (customerService.GetById(id) == null)
         return Results.NotFound();
 
-    return Results.Ok(new ActivityService().GetByCustomer(id));
+    return Results.Ok(activityService.GetByCustomer(id));
 });
 
-app.MapPost("/api/customers/{id:int}/activities", (int id, Activity activity) =>
+app.MapPost("/api/customers/{id:int}/activities", (int id, Activity activity, ICustomerService customerService, IActivityService activityService) =>
 {
-    if (new CustomerService().GetById(id) == null)
+    if (customerService.GetById(id) == null)
         return Results.NotFound();
 
     if (string.IsNullOrWhiteSpace(activity.Title))
@@ -289,26 +294,25 @@ app.MapPost("/api/customers/{id:int}/activities", (int id, Activity activity) =>
 
     activity.CustomerId = id;
     activity.Done = false;
-    new ActivityService().Add(activity);
+    activityService.Add(activity);
 
     return Results.Json(activity, statusCode: StatusCodes.Status201Created);
 });
 
 // All activities, or only the open ones with ?open=true
-app.MapGet("/api/activities", (bool? open) =>
+app.MapGet("/api/activities", (bool? open, IActivityService activityService) =>
 {
-    var service = new ActivityService();
-    return open == true ? service.GetOpen() : service.GetAll();
+    return open == true ? activityService.GetOpen() : activityService.GetAll();
 });
 
-app.MapPut("/api/activities/{id:int}/done", (int id, DoneRequest request) =>
+app.MapPut("/api/activities/{id:int}/done", (int id, DoneRequest request, IActivityService activityService) =>
 {
-    return new ActivityService().SetDone(id, request.Done) ? Results.NoContent() : Results.NotFound();
+    return activityService.SetDone(id, request.Done) ? Results.NoContent() : Results.NotFound();
 });
 
-app.MapDelete("/api/activities/{id:int}", (int id) =>
+app.MapDelete("/api/activities/{id:int}", (int id, IActivityService activityService) =>
 {
-    return new ActivityService().Delete(id) ? Results.NoContent() : Results.NotFound();
+    return activityService.Delete(id) ? Results.NoContent() : Results.NotFound();
 });
 
 app.Run();
